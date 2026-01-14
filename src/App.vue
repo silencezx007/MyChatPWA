@@ -1,5 +1,5 @@
 <template>
-  <div class="container">
+  <div :class="['container', { flash: isFlashing }]">
     <!-- 登录界面 -->
     <div v-if="state === 'login'" class="screen center">
       <div class="logo">🔐</div>
@@ -105,12 +105,37 @@ let unsubscribeMessages = null;
 let titleBlinkInterval = null;
 const originalTitle = 'NiceTalk';
 let originalFavicon = null;
+let audioContext = null; // 预初始化的音频上下文
+const isFlashing = ref(false); // 屏幕闪烁状态
+
+// 预初始化音频上下文（需要用户交互触发）
+const initAudioContext = () => {
+  try {
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // 恢复被暂停的 AudioContext（移动端要求）
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+  } catch (e) {
+    console.log('初始化音频上下文失败:', e);
+  }
+};
 
 // 播放提示音
 const playNotificationSound = () => {
   try {
-    // 使用 Web Audio API 生成简短提示音
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    // 如果没有预初始化，尝试创建新的
+    if (!audioContext) {
+      audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    
+    // 恢复被暂停的 AudioContext
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
+    
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
     
@@ -127,6 +152,21 @@ const playNotificationSound = () => {
   } catch (e) {
     console.log('无法播放提示音:', e);
   }
+};
+
+// 振动反馈（Android 支持）
+const vibrateDevice = () => {
+  if ('vibrate' in navigator) {
+    navigator.vibrate([200, 100, 200]); // 短-停-短
+  }
+};
+
+// 屏幕闪烁效果（移动端 PWA 可见）
+const flashScreen = () => {
+  isFlashing.value = true;
+  setTimeout(() => {
+    isFlashing.value = false;
+  }, 1000);
 };
 
 // 创建带红点的 favicon
@@ -193,6 +233,12 @@ const startNotification = () => {
   
   // 播放提示音
   playNotificationSound();
+  
+  // 振动反馈（移动端 Android）
+  vibrateDevice();
+  
+  // 屏幕闪烁效果（移动端 PWA 可见）
+  flashScreen();
 };
 
 // 停止通知（清除标题闪烁和恢复 favicon）
@@ -365,6 +411,9 @@ const startListening = (roomId) => {
       state.value = 'chatting';
       isLoading.value = false;
       
+      // 预初始化音频上下文（需要用户交互后才能生效）
+      initAudioContext();
+      
       // 开始监听消息
       if (!unsubscribeMessages) {
         const q = query(collection(db, `rooms/${roomId}/messages`), orderBy('createdAt'));
@@ -516,6 +565,16 @@ html, body {
 
 #app {
   height: 100%;
+}
+
+/* ==================== Screen Flash Animation (Mobile PWA) ==================== */
+@keyframes screenFlash {
+  0%, 100% { box-shadow: inset 0 0 0 0 transparent; }
+  50% { box-shadow: inset 0 0 0 4px #FF3B30; }
+}
+
+.container.flash {
+  animation: screenFlash 0.5s ease-out 2;
 }
 
 /* ==================== Layout ==================== */
