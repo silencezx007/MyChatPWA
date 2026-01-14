@@ -13,7 +13,7 @@
         
         <div class="input-group">
           <label>Code</label>
-          <input v-model="form.password" type="password" />
+          <input v-model="form.password" type="password" @keyup.enter="joinOrCreateRoom" />
         </div>
 
         <button @click="joinOrCreateRoom" class="btn-primary" :disabled="!isValidForm || isLoading">
@@ -43,7 +43,10 @@
           <span class="room-badge">{{ form.roomId }}</span>
           <span class="status-dot"></span> 加密连接中
         </div>
-        <button @click="destroyRoom" class="btn-danger">销毁</button>
+        <div class="header-actions">
+          <button @click="showSettings = true" class="btn-icon" title="设置">⚙️</button>
+          <button @click="destroyRoom" class="btn-danger">销毁</button>
+        </div>
       </header>
       
       <div class="messages" ref="msgBox">
@@ -71,6 +74,31 @@
         <h3>房间已销毁</h3>
         <p>聊天记录已被永久删除</p>
         <button class="btn-primary" @click="closeDestroyedModal">确定</button>
+      </div>
+    </div>
+
+    <!-- 设置弹窗 -->
+    <div v-if="showSettings" class="modal-overlay" @click="showSettings = false">
+      <div class="modal settings-modal" @click.stop>
+        <div class="modal-header">
+          <h3>🔔 通知设置</h3>
+          <button class="btn-close" @click="showSettings = false">✕</button>
+        </div>
+        <div class="settings-list">
+          <div class="setting-item" @click="toggleSetting('soundEnabled')">
+            <span class="setting-label">🔊 声音提示</span>
+            <span :class="['toggle', { active: settings.soundEnabled }]"></span>
+          </div>
+          <div class="setting-item" @click="toggleSetting('vibrationEnabled')">
+            <span class="setting-label">📳 振动反馈</span>
+            <span :class="['toggle', { active: settings.vibrationEnabled }]"></span>
+          </div>
+          <div class="setting-item" @click="toggleSetting('flashEnabled')">
+            <span class="setting-label">💡 屏幕闪烁</span>
+            <span :class="['toggle', { active: settings.flashEnabled }]"></span>
+          </div>
+        </div>
+        <p class="settings-note">设置会自动保存</p>
       </div>
     </div>
   </div>
@@ -107,6 +135,46 @@ const originalTitle = 'NiceTalk';
 let originalFavicon = null;
 let audioContext = null; // 预初始化的音频上下文
 const isFlashing = ref(false); // 屏幕闪烁状态
+
+// ==================== 通知设置 ====================
+const showSettings = ref(false);
+const settings = ref({
+  soundEnabled: true,
+  vibrationEnabled: true,
+  flashEnabled: true
+});
+
+// 从 localStorage 加载设置
+const loadSettings = () => {
+  try {
+    const saved = localStorage.getItem('nicetalk_settings');
+    if (saved) {
+      settings.value = { ...settings.value, ...JSON.parse(saved) };
+    }
+  } catch (e) {
+    console.log('加载设置失败:', e);
+  }
+};
+
+// 保存设置到 localStorage
+const saveSettings = () => {
+  try {
+    localStorage.setItem('nicetalk_settings', JSON.stringify(settings.value));
+  } catch (e) {
+    console.log('保存设置失败:', e);
+  }
+};
+
+// 切换设置项
+const toggleSetting = (key) => {
+  settings.value[key] = !settings.value[key];
+  saveSettings();
+  
+  // 如果开启声音，预初始化音频
+  if (key === 'soundEnabled' && settings.value.soundEnabled) {
+    initAudioContext();
+  }
+};
 
 // 预初始化音频上下文（需要用户交互触发）
 const initAudioContext = () => {
@@ -231,14 +299,20 @@ const startNotification = () => {
     }, 800);
   }
   
-  // 播放提示音
-  playNotificationSound();
+  // 播放提示音（根据设置）
+  if (settings.value.soundEnabled) {
+    playNotificationSound();
+  }
   
-  // 振动反馈（移动端 Android）
-  vibrateDevice();
+  // 振动反馈（根据设置）
+  if (settings.value.vibrationEnabled) {
+    vibrateDevice();
+  }
   
-  // 屏幕闪烁效果（移动端 PWA 可见）
-  flashScreen();
+  // 屏幕闪烁效果（根据设置）
+  if (settings.value.flashEnabled) {
+    flashScreen();
+  }
 };
 
 // 停止通知（清除标题闪烁和恢复 favicon）
@@ -265,6 +339,9 @@ onMounted(async () => {
     console.error('登录失败:', e);
     errorMsg.value = '连接失败，请刷新重试';
   }
+  
+  // 加载用户设置
+  loadSettings();
   
   // 请求通知权限（iOS PWA Badge 需要）
   if ('Notification' in window && Notification.permission === 'default') {
@@ -969,6 +1046,121 @@ html, body {
   color: var(--text-secondary);
   margin-bottom: 24px;
   font-size: 15px;
+}
+
+/* ==================== Settings Modal ==================== */
+.settings-modal {
+  text-align: left;
+  padding: 20px;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.modal-header h3 {
+  margin: 0;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.btn-close:hover {
+  color: var(--text-primary);
+}
+
+.settings-list {
+  margin-bottom: 16px;
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid #E5E5EA;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.setting-item:last-child {
+  border-bottom: none;
+}
+
+.setting-item:active {
+  background: #F2F2F7;
+  margin: 0 -20px;
+  padding: 14px 20px;
+}
+
+.setting-label {
+  font-size: 16px;
+}
+
+.toggle {
+  width: 50px;
+  height: 30px;
+  background: #E5E5EA;
+  border-radius: 15px;
+  position: relative;
+  transition: all 0.3s;
+}
+
+.toggle::after {
+  content: '';
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  background: #fff;
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: all 0.3s;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.toggle.active {
+  background: var(--green);
+}
+
+.toggle.active::after {
+  left: 22px;
+}
+
+.settings-note {
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: center;
+  margin: 0;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-icon {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.btn-icon:hover {
+  opacity: 1;
 }
 
 /* ==================== Responsive ==================== */
