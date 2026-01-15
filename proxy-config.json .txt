@@ -1,0 +1,6 @@
+{
+  "useProxy": true,
+  "supabaseProxyUrl": "https://mychatpwa.silencezx009.workers.dev",
+  "firebaseTimeout": 2500,
+  "notice": "当前正在使用 Cloudflare 代理以优化国内访问体验"
+}
