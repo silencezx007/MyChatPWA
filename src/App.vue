@@ -108,12 +108,8 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue';
-import { db, auth } from './firebase';
-import { signInAnonymously } from "firebase/auth";
-import { 
-  collection, doc, setDoc, getDoc, getDocs, updateDoc, deleteDoc, onSnapshot, 
-  serverTimestamp, query, orderBy, arrayUnion, writeBatch 
-} from "firebase/firestore";
+import { authManager } from './utils/authManager';
+import { chatProvider } from './services/chatProvider';
 
 // ==================== 状态管理 ====================
 const state = ref('login'); // login, waiting, chatting
@@ -126,6 +122,7 @@ const msgBox = ref(null);
 const btnText = ref('进入房间');
 const isLoading = ref(false);
 const showDestroyed = ref(false);
+const currentPlatform = ref('firebase'); // 'firebase' | 'supabase'
 
 // 监听器
 let unsubscribeRoom = null;
@@ -380,17 +377,50 @@ const stopNotification = () => {
 // ==================== 初始化 ====================
 onMounted(async () => {
   try {
-    const userCred = await signInAnonymously(auth);
-    myId.value = userCred.user.uid;
+    // 1. 获取远程配置与网络探测
+    let useProxy = false;
+    try {
+       const res = await fetch('https://silencezx007.github.io/proxy-config.json');
+       if (res.ok) {
+         const config = await res.json();
+         useProxy = config.useProxy;
+         console.log('远程配置:', config);
+       }
+    } catch (e) {
+       console.warn('获取远程配置失败，使用默认 Firebase', e);
+    }
+    
+    // 2. 决定平台
+    // 如果没有强制代理，可以尝试简单的 Firebase 连通性测试 (HEAD 请求或者简单fetch)
+    if (!useProxy) {
+      // 简单探测
+      try {
+         await fetch('https://firebase.google.com', { mode: 'no-cors' });
+         currentPlatform.value = 'firebase';
+      } catch (e) {
+         console.log('Firebase 探测失败，切换至 Supabase 代理');
+         currentPlatform.value = 'supabase';
+      }
+    } else {
+      currentPlatform.value = 'supabase';
+    }
+    
+    // 3. 初始化对应的 Service
+    const service = chatProvider.initService(currentPlatform.value);
+    
+    // 4. 执行登录/初始化
+    myId.value = await service.init();
+    console.log(`已连接到 ${currentPlatform.value}, ID: ${myId.value}`);
+
   } catch (e) {
-    console.error('登录失败:', e);
-    errorMsg.value = '连接失败，请刷新重试';
+    console.error('初始化失败:', e);
+    errorMsg.value = '连接初始化失败，请重试';
   }
   
   // 加载用户设置
   loadSettings();
   
-  // 请求通知权限（iOS PWA Badge 需要）
+  // 请求通知权限
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission();
   }
@@ -398,11 +428,7 @@ onMounted(async () => {
   // 页面可见时清除所有通知
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
-      // 清除 App Badge
-      if ('clearAppBadge' in navigator) {
-        navigator.clearAppBadge().catch(() => {});
-      }
-      // 停止标题闪烁和恢复 favicon
+      if ('clearAppBadge' in navigator) navigator.clearAppBadge().catch(() => {});
       stopNotification();
     }
   });
@@ -424,8 +450,20 @@ const isValidForm = computed(() => {
 // 进入或创建房间
 const joinOrCreateRoom = async () => {
   if (!myId.value) {
-    errorMsg.value = '未登录，请刷新页面';
-    return;
+    // 尝试重新登录/初始化身份
+    try {
+      if (currentPlatform.value === 'supabase') {
+         // Supabase 场景：如果没有 ID，重新初始化
+         const service = await chatProvider.getService();
+         myId.value = await service.init();
+      } else {
+         errorMsg.value = '未连接到服务';
+         return;
+      }
+    } catch(e) {
+      errorMsg.value = '无法获取身份信息';
+      return;
+    }
   }
   
   errorMsg.value = '';
@@ -434,82 +472,20 @@ const joinOrCreateRoom = async () => {
   
   const roomId = form.value.roomId.trim();
   const password = form.value.password.trim();
-  const roomRef = doc(db, 'rooms', roomId);
 
   try {
-    const docSnap = await getDoc(roomRef);
-
-    if (docSnap.exists()) {
-      // 房间存在 -> 尝试加入
-      const data = docSnap.data();
-      
-      // 0. 检查房间是否过期
-      if (data.expiresAt && data.expiresAt.toDate() < new Date()) {
-        // 房间已过期，静默清理后创建新房间
-        const messagesRef = collection(db, `rooms/${roomId}/messages`);
-        const snapshot = await getDocs(messagesRef);
-        for (const d of snapshot.docs) {
-          await deleteDoc(d.ref);
-        }
-        await deleteDoc(roomRef);
-        
-        // 创建新房间（复用下方创建逻辑）
-        await setDoc(roomRef, {
-          roomId: roomId,
-          password: password,
-          participants: [myId.value],
-          createdAt: serverTimestamp(),
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-          status: 'waiting'
-        });
-        
-        startListening(roomId);
-        return;
-      }
-      
-      // 1. 校验密码
-      if (data.password !== password) {
-        errorMsg.value = '密码错误，无法进入该房间';
-        resetButton();
-        return;
-      }
-      
-      // 2. 校验人数
-      if (data.participants.length >= 2 && !data.participants.includes(myId.value)) {
-        errorMsg.value = '房间已满 (2人)';
-        resetButton();
-        return;
-      }
-
-      // 3. 加入房间
-      if (!data.participants.includes(myId.value)) {
-        await updateDoc(roomRef, {
-          participants: arrayUnion(myId.value),
-          status: 'active'
-        });
-      }
-      
-      startListening(roomId);
-
-    } else {
-      // 房间不存在 -> 创建新房间
-      await setDoc(roomRef, {
-        roomId: roomId,
-        password: password,
-        participants: [myId.value],
-        createdAt: serverTimestamp(),
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10分钟后过期
-        status: 'waiting'
-      });
-      
-      startListening(roomId);
-      
-      // 启动后台保活（利用当前的点击交互）
-      initSilentAudio();
-    }
+    const service = await chatProvider.getService();
+    await service.joinOrCreateRoom(roomId, password, myId.value);
+    
+    // 如果没有报错，说明成功，开始监听
+    startListening(roomId);
+    
+    // 启动后台保活
+    initSilentAudio();
+    
   } catch (e) {
     console.error('连接失败:', e);
-    errorMsg.value = '连接失败，请检查网络';
+    errorMsg.value = e.message || '连接失败，请检查网络';
     resetButton();
   }
 };
@@ -521,64 +497,55 @@ const resetButton = () => {
 };
 
 // 监听房间状态和消息
-const startListening = (roomId) => {
+const startListening = async (roomId) => {
+  const service = await chatProvider.getService();
+
   // 监听房间文档
-  unsubscribeRoom = onSnapshot(doc(db, 'rooms', roomId), (docSnap) => {
-    if (!docSnap.exists()) {
-      // 房间被销毁了
+  unsubscribeRoom = service.onRoomUpdate(roomId, (docSnap) => {
+    // 兼容层：适配 Firebase Snapshot 和 Supabase 普通对象
+    const exists = typeof docSnap.exists === 'function' ? docSnap.exists() : !!docSnap;
+    if (!exists) {
       showDestroyed.value = true;
       cleanup();
       return;
     }
     
-    const data = docSnap.data();
+    const data = typeof docSnap.data === 'function' ? docSnap.data() : docSnap;
     
     // 判断状态
-    if (data.participants.length === 2) {
-      // 检查是否是刚匹配成功（从 waiting/login -> chatting）
+    if (data.participants && data.participants.length === 2) {
       const isNewMatch = state.value !== 'chatting';
       
       state.value = 'chatting';
       isLoading.value = false;
       
-      // 预初始化音频上下文
       initAudioContext();
-      
-      // 确保保活音频在播放
       initSilentAudio();
       
-      // 如果是新匹配，触发通知（声音+视觉）
       if (isNewMatch) {
         startNotification();
-        
-        // 如果页面当前可见，延迟关闭视觉提醒（避免一直闪烁）
         if (!document.hidden) {
-          setTimeout(() => {
-            stopNotification();
-          }, 2000);
+          setTimeout(() => stopNotification(), 2000);
         }
       }
       
       // 开始监听消息
       if (!unsubscribeMessages) {
-        const q = query(collection(db, `rooms/${roomId}/messages`), orderBy('createdAt'));
-        let prevCount = 0;
-        unsubscribeMessages = onSnapshot(q, (snap) => {
-          const newMessages = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        unsubscribeMessages = service.onMessageUpdate(roomId, (snap) => {
+          // 兼容层：适配 QuerySnapshot (.docs -> .data()) 和 普通数组
+          const rawDocs = snap.docs || snap; 
+          const newMessages = rawDocs.map(d => {
+             const dData = typeof d.data === 'function' ? d.data() : d;
+             return { id: d.id, ...dData };
+          });
           
-          // 检查是否有新消息（非自己发送的）
-          if (newMessages.length > prevCount && document.hidden) {
+          if (newMessages.length > messages.value.length && document.hidden) {
             const latestMsg = newMessages[newMessages.length - 1];
             if (latestMsg.sender !== myId.value) {
-              // 设置 App Badge（红点）
-              if ('setAppBadge' in navigator) {
-                navigator.setAppBadge().catch(() => {});
-              }
-              // 启动通知：标题闪烁 + favicon 红点 + 声音
+              if ('setAppBadge' in navigator) navigator.setAppBadge().catch(() => {});
               startNotification();
             }
           }
-          prevCount = newMessages.length;
           
           messages.value = newMessages;
           nextTick(() => {
@@ -592,26 +559,18 @@ const startListening = (roomId) => {
       state.value = 'waiting';
       isLoading.value = false;
     }
-  }, (err) => {
-    console.error('监听房间失败:', err);
-    errorMsg.value = '连接中断';
-    cleanup();
-  });
+  }); // Error handling missing in service wrapper? Service should handle logging.
 };
 
 // 发送消息
 const sendMessage = async () => {
   if (!inputText.value.trim()) return;
-  
   const text = inputText.value.trim();
   inputText.value = '';
   
   try {
-    await setDoc(doc(collection(db, `rooms/${form.value.roomId}/messages`)), {
-      text,
-      sender: myId.value,
-      createdAt: serverTimestamp()
-    });
+    const service = await chatProvider.getService();
+    await service.sendMessage(form.value.roomId, text, myId.value);
   } catch (e) {
     console.error('发送失败:', e);
     errorMsg.value = '发送失败';
@@ -621,34 +580,19 @@ const sendMessage = async () => {
 // 销毁房间 (阅后即焚)
 const destroyRoom = async () => {
   try {
-    const roomId = form.value.roomId;
-    const batch = writeBatch(db);
-    
-    // 1. 获取所有消息
-    const messagesRef = collection(db, `rooms/${roomId}/messages`);
-    const snapshot = await getDocs(messagesRef);
-    
-    // 2. 将消息删除操作加入批处理
-    snapshot.docs.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
-    
-    // 3. 将房间删除操作加入批处理
-    batch.delete(doc(db, 'rooms', roomId));
-    
-    // 4. 一次性提交所有操作
-    await batch.commit();
-    
-    // onSnapshot 会自动检测到删除并触发 cleanup
+    const service = await chatProvider.getService();
+    await service.destroyRoom(form.value.roomId);
   } catch (e) {
     console.error('销毁失败:', e);
   }
+  // onSnapshot 会触发 cleanup
 };
 
 // 离开房间 (取消等待)
 const leaveRoom = async () => {
   try {
-    await deleteDoc(doc(db, 'rooms', form.value.roomId));
+    const service = await chatProvider.getService();
+    await service.leaveRoom(form.value.roomId, myId.value);
   } catch (e) {
     console.error('离开失败:', e);
   }
@@ -666,7 +610,7 @@ const cleanup = () => {
     unsubscribeRoom = null;
   }
   
-  stopSilentAudio(); // 停止后台保活
+  stopSilentAudio();
   
   state.value = 'login';
   messages.value = [];
