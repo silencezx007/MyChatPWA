@@ -21,6 +21,10 @@
         </button>
         <p class="hint" v-if="errorMsg">{{ errorMsg }}</p>
       </div>
+
+      <div class="privacy-disclaimer">
+        <strong>不保留</strong>任何历史聊天日志。所有数据存储于内存或临时数据库记录中，一旦会话结束或用户主动销毁，并在技术上不可恢复。
+      </div>
     </div>
 
     <!-- 等待界面 -->
@@ -32,7 +36,7 @@
         <div class="loader"></div>
       </div>
       <h2>房间: {{ form.roomId }}</h2>
-      <p class="status-text">...天边...眼前</p>
+      <p class="status-text">此时此刻，连接你我</p>
       <button @click="leaveRoom" class="btn-text">取消等待</button>
     </div>
 
@@ -798,6 +802,28 @@ html, body {
 
 .btn-primary:active {
   transform: scale(0.98);
+}
+
+.privacy-disclaimer {
+  margin-top: 32px;
+  max-width: 320px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: rgba(0, 0, 0, 0.45);
+  text-align: center;
+  padding: 16px;
+  font-family: 'SF Mono', 'Menlo', monospace; /* Tech feel */
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.5px;
+}
+
+.privacy-disclaimer strong {
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.6);
 }
 
 .btn-danger {
