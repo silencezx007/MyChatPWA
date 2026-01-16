@@ -381,28 +381,39 @@ const stopNotification = () => {
 // ==================== 初始化 ====================
 onMounted(async () => {
   try {
+    // 辅助函数：带超时的 fetch
+    const fetchWithTimeout = (url, options = {}, timeout = 3000) => {
+      return Promise.race([
+        fetch(url, options),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Request timeout')), timeout)
+        )
+      ]);
+    };
+
     // 1. 获取远程配置与网络探测
     let useProxy = false;
     try {
-       const res = await fetch('https://silencezx007.github.io/proxy-config.json');
+       // 设置 3 秒超时，避免 GitHub Pages 被墙时卡住
+       const res = await fetchWithTimeout('https://silencezx007.github.io/proxy-config.json', {}, 3000);
        if (res.ok) {
          const config = await res.json();
          useProxy = config.useProxy;
          console.log('远程配置:', config);
        }
     } catch (e) {
-       console.warn('获取远程配置失败，使用默认 Firebase', e);
+       console.warn('获取远程配置失败 (可能被墙)，使用默认逻辑', e);
     }
     
     // 2. 决定平台
-    // 如果没有强制代理，可以尝试简单的 Firebase 连通性测试 (HEAD 请求或者简单fetch)
     if (!useProxy) {
       // 简单探测
       try {
-         await fetch('https://firebase.google.com', { mode: 'no-cors' });
+         // 设置 3 秒超时，如果 Firebase 连不上（被墙），快速失败切换到 Supabase
+         await fetchWithTimeout('https://firebase.google.com', { mode: 'no-cors' }, 3000);
          currentPlatform.value = 'firebase';
       } catch (e) {
-         console.log('Firebase 探测失败，切换至 Supabase 代理');
+         console.log('Firebase 探测失败/超时，切换至 Supabase 代理');
          currentPlatform.value = 'supabase';
       }
     } else {
