@@ -6,20 +6,29 @@ const supabase = createClient(AUTH_CONFIG.SUPABASE_PROXY_URL, AUTH_CONFIG.SUPABA
 
 export const supabaseService = {
     async init() {
-        // 匿名登录逻辑：如果是 Supabase，通常依然需要 Auth。
-        // 这里我们假设使用 AuthManager 已经登录了，或者直接使用 anon key 访问（根据 RLS 策略）
-        // 为了简单，我们返回一个随机生成的 ID 或者是 auth.user.id
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) return user.id;
-
-        // 如果没有用户（且我们允许无 Auth 访问），生成一个随机 ID 存 localStorage
-        // 但通常建议走 supabase.auth.signInAnonymously() (如果配置了)
-        // 这里复用 AuthManager 的登录结果，假设 App.vue 会传递 user 对象
-        // 为保持接口一致，我们这里尝试获取当前 Session 用户
+        // 1. Try existing session
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) return session.user.id;
 
-        throw new Error('Supabase 未认证，无法初始化 Service');
+        // 2. Try anonymous sign-in (requires Supabase project to enable "Allow anonymous sign-ins")
+        try {
+            const { data, error } = await supabase.auth.signInAnonymously();
+            if (!error && data?.user) {
+                console.log('Supabase anonymous login success:', data.user.id);
+                return data.user.id;
+            }
+        } catch (e) {
+            console.warn('Supabase anonymous auth failed:', e);
+        }
+
+        // 3. Fallback: Generate local UUID (for RLS policies allowing anon key access)
+        let localId = localStorage.getItem('nicetalk_anon_id');
+        if (!localId) {
+            localId = 'anon_' + crypto.randomUUID();
+            localStorage.setItem('nicetalk_anon_id', localId);
+        }
+        console.log('Using local anonymous ID:', localId);
+        return localId;
     },
 
     async joinOrCreateRoom(roomId, password, userId) {
