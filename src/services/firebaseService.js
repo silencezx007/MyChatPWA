@@ -78,7 +78,18 @@ export const firebaseService = {
     },
 
     onRoomUpdate(roomId, callback) {
-        return onSnapshot(doc(db, 'rooms', roomId), callback);
+        return onSnapshot(doc(db, 'rooms', roomId), (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.data();
+                // Normalize createdAt using Firestore Timestamp conversion
+                callback({
+                    exists: () => true,
+                    data: () => ({ ...data, createdAt: data.createdAt?.toDate() })
+                });
+            } else {
+                callback({ exists: () => false });
+            }
+        });
     },
 
     onMessageUpdate(roomId, callback) {

@@ -127,8 +127,12 @@ export const supabaseService = {
             .eq('room_id', roomId)
             .single()
             .then(({ data, error }) => {
-                if (!error && data) callback({ exists: () => true, data: () => data });
-                else callback({ exists: () => false });
+                if (!error && data) {
+                    callback({
+                        exists: () => true,
+                        data: () => ({ ...data, createdAt: new Date(data.created_at) })
+                    });
+                } else callback({ exists: () => false });
             });
 
         // 2. Subscribe
@@ -138,7 +142,11 @@ export const supabaseService = {
                 if (payload.eventType === 'DELETE') {
                     callback({ exists: () => false });
                 } else {
-                    callback({ exists: () => true, data: () => payload.new });
+                    const newData = payload.new;
+                    callback({
+                        exists: () => true,
+                        data: () => ({ ...newData, createdAt: new Date(newData.created_at) })
+                    });
                 }
             })
             .subscribe();

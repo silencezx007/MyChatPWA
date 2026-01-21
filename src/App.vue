@@ -54,6 +54,11 @@
       </header>
       
       <div class="messages" ref="msgBox">
+        <!-- System Notice Banner -->
+        <div v-if="systemNotice" class="system-notice-banner">
+          <span>🔔 {{ systemNotice }}</span>
+        </div>
+
         <div v-if="messages.length === 0" class="empty-messages">
           <p>👋 开始聊天吧</p>
         </div>
@@ -138,6 +143,7 @@ const originalTitle = 'NiceTalk';
 let originalFavicon = null;
 let audioContext = null; // 预初始化的音频上下文
 const isFlashing = ref(false); // 屏幕闪烁状态
+const systemNotice = ref(''); // 本地系统提示
 
 // ==================== iOS 后台保活 ====================
 let silentAudio = null;
@@ -542,6 +548,30 @@ const startListening = async (roomId) => {
         if (!document.hidden) {
           setTimeout(() => stopNotification(), 2000);
         }
+
+        // Feature: Waiting Since Notification
+        // If I am the second participant (joiner), show how long the creator (participants[0]) has been waiting.
+        if (data.participants[0] !== myId.value && data.createdAt) {
+          const createdAt = new Date(data.createdAt);
+          const now = new Date();
+          const diffMs = now - createdAt;
+          const diffMins = Math.floor(diffMs / 60000);
+
+          if (diffMins > 0) {
+            const timeString = createdAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+            // Add local system message (not saved to DB)
+            // Use a slight delay to ensure it renders after message list init (or just push it)
+            // Ideally we want it at the top or bottom? Usually top of conversation.
+            // But we init messages right after. Let's add it to a separate reactive variable or push to messages after load.
+            // Simpler: Just push it to messages array logic or handle it in UI as a banner.
+            // Request said "界面有个额外提示". A system message bubble is best.
+            
+            // We'll add it after messages are loaded or simply trigger it here. 
+            // Since messages are loaded via onMessageUpdate, we can't easily inject into that stream without it being overwritten.
+            // BETTER APPROACH: Add a separate 'systemNotice' ref and display it in the UI above the message list.
+            systemNotice.value = `对方于 ${timeString} 上线，已等待 ${diffMins} 分钟`;
+          }
+        }
       }
       
       // 开始监听消息
@@ -866,6 +896,27 @@ html, body {
 
 .btn-text:hover {
   color: var(--text-primary);
+}
+
+.system-notice-banner {
+  margin: 16px 16px 0;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-secondary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from { transform: translateY(-10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 /* ==================== Waiting Screen ==================== */
