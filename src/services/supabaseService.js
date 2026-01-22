@@ -58,11 +58,14 @@ export const supabaseService = {
             // Join
             if (!room.participants.includes(userId)) {
                 const newParticipants = [...room.participants, userId];
+                // 刷新过期时间，确保聊天期间不会被清理（延长1小时）
+                const newExpiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
                 await supabase
                     .from('rooms')
                     .update({
                         participants: newParticipants,
-                        status: 'active'
+                        status: 'active',
+                        expires_at: newExpiresAt
                     })
                     .eq('room_id', roomId);
             }
@@ -72,7 +75,8 @@ export const supabaseService = {
     },
 
     async createRoom(roomId, password, userId) {
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+        // 延长房间有效期到30分钟，避免等待时被清理
+        const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
         const { error } = await supabase
             .from('rooms')
             .insert({
