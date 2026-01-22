@@ -15,11 +15,13 @@ export default {
 
     // 2. 处理预检请求 (CORS)
     if (request.method === "OPTIONS") {
+      // 获取请求中的 Access-Control-Request-Headers 并原样返回
+      const requestHeaders = request.headers.get("Access-Control-Request-Headers") || "*";
       return new Response(null, {
         headers: {
           "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey, x-supabase-auth, prefer", // Added prefer
+          "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+          "Access-Control-Allow-Headers": requestHeaders,
           "Access-Control-Max-Age": "86400",
         },
       });

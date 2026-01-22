@@ -412,19 +412,10 @@ onMounted(async () => {
     }
     
     // 2. 决定平台
-    if (!useProxy) {
-      // 简单探测
-      try {
-         // 设置 3 秒超时，如果 Firebase 连不上（被墙），快速失败切换到 Supabase
-         await fetchWithTimeout('https://firebase.google.com', { mode: 'no-cors' }, 3000);
-         currentPlatform.value = 'firebase';
-      } catch (e) {
-         console.log('Firebase 探测失败/超时，切换至 Supabase 代理');
-         currentPlatform.value = 'supabase';
-      }
-    } else {
-      currentPlatform.value = 'supabase';
-    }
+    // 强制使用 Supabase 以确保所有设备连接到同一后端
+    // TODO: 后续可恢复动态平台检测
+    currentPlatform.value = 'supabase';
+    console.log('强制使用 Supabase 平台');
     
     // 3. 初始化对应的 Service
     const service = chatProvider.initService(currentPlatform.value);
@@ -559,18 +550,13 @@ const startListening = async (roomId) => {
 
           if (diffMins > 0) {
             const timeString = createdAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-            // Add local system message (not saved to DB)
-            // Use a slight delay to ensure it renders after message list init (or just push it)
-            // Ideally we want it at the top or bottom? Usually top of conversation.
-            // But we init messages right after. Let's add it to a separate reactive variable or push to messages after load.
-            // Simpler: Just push it to messages array logic or handle it in UI as a banner.
-            // Request said "界面有个额外提示". A system message bubble is best.
-            
-            // We'll add it after messages are loaded or simply trigger it here. 
-            // Since messages are loaded via onMessageUpdate, we can't easily inject into that stream without it being overwritten.
-            // BETTER APPROACH: Add a separate 'systemNotice' ref and display it in the UI above the message list.
             systemNotice.value = `对方于 ${timeString} 上线，已等待 ${diffMins} 分钟`;
+            console.log('[等待时间提示] 设置成功:', systemNotice.value);
+          } else {
+            console.log('[等待时间提示] 等待时间不足1分钟，不显示');
           }
+        } else {
+          console.log('[等待时间提示] 我是创建者或无createdAt数据');
         }
       }
       
@@ -900,18 +886,28 @@ html, body {
 
 .system-notice-banner {
   margin: 16px 16px 0;
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.6);
+  padding: 14px 18px;
+  /* 提高背景不透明度以增强可见度 */
+  background: rgba(255, 255, 255, 0.95);
+  /* 添加边框增强视觉效果 */
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  /* 保留模糊效果，但不依赖它 */
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
-  color: var(--text-secondary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  /* 增大字体以提高可读性 */
+  font-size: 14px;
+  font-weight: 500;
+  /* 使用更明显的颜色 */
+  color: var(--text-primary);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
   animation: slideDown 0.3s ease-out;
+  /* 确保在所有浏览器中都可见 */
+  min-height: 40px;
+  line-height: 1.4;
 }
 
 @keyframes slideDown {
